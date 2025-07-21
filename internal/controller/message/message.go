@@ -2,8 +2,8 @@ package controller
 
 import (
 	"context"
-	"my-app/api/message/v1"
-	"my-app/internal/service"
+	v1 "we-demo-gf/api/message/v1"
+	service "we-demo-gf/internal/service/message"
 )
 
 type ControllerMessage struct{}
