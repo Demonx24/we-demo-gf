@@ -2,11 +2,10 @@ package boot
 
 import (
 	"context"
-	"log"
-	"time"
-
+	_ "github.com/gogf/gf/contrib/nosql/redis/v2"
 	"github.com/gogf/gf/v2/database/gredis" // 使用 gf 内置的 gredis
 	"github.com/gogf/gf/v2/frame/g"
+	"time"
 )
 
 var RedisClient *gredis.Redis
@@ -24,7 +23,7 @@ type RedisCfg struct {
 func InitRedis() {
 	// 读取配置
 	var rc RedisCfg
-	err := g.Cfg().MustGet(context.Background(), "redis.default").Struct(&rc)
+	err := g.Cfg().MustGet(context.Background(), "redis").Struct(&rc)
 	if err != nil {
 		panic("配置绑定失败：" + err.Error())
 	}
@@ -39,7 +38,7 @@ func InitRedis() {
 		MaxIdle:     rc.MaxIdle,
 		MinIdle:     rc.MinIdle,
 	}
-
+	g.Log().Info(context.Background(), "redis密码", rc.Pass)
 	// 使用 gredis.New 创建 Redis 客户端实例
 	client, err := gredis.New(conf)
 	if err != nil {
@@ -56,5 +55,5 @@ func InitRedis() {
 		panic("Redis ping failed: " + err.Error())
 	}
 
-	log.Println(" Redis 初始化成功")
+	g.Log().Info(context.Background(), " Redis 初始化成功")
 }

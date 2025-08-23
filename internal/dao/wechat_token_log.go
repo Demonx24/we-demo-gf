@@ -2,36 +2,43 @@ package dao
 
 import (
 	"context"
+	"demo/internal/model/entity"
 	"github.com/gogf/gf/v2/errors/gerror"
-
 	"github.com/gogf/gf/v2/frame/g"
-	"we-demo-gf/internal/model/entity"
 )
 
-var TokenLog = tokenLogDao{}
+var TokenLog = TokenLogDao{}
 
-type tokenLogDao struct{}
+type TokenLogDao struct{}
 
-// SaveOrUpdate 保存或更新 TokenLog，根据 app_id 判断唯一性
-func (d *tokenLogDao) SaveOrUpdate(ctx context.Context, log *entity.WechatTokenLog) error {
-	if log == nil {
-		return gerror.New("TokenLog 为空")
+func (d *TokenLogDao) SaveWechatTokenLog(ctx context.Context, tokenLog *entity.WechatTokenLog) error {
+	if tokenLog == nil {
+		return gerror.New("tokenLog 为空")
 	}
 
-	// 使用 ON DUPLICATE KEY UPDATE 的方式（MySQL 特有）
-	_, err := g.Model("wechat_token_log").
-		Save(log) // Save 方法在有主键或唯一键时可自动执行插入或更新
-	return err
+	db := g.DB()
+
+	// 使用 Save 并带 Where 条件，GF 会根据条件判断记录是否存在，存在则更新，不存在则插入
+	_, err := db.Ctx(ctx).Model("wechat_token_log").
+		Where("app_id", tokenLog.AppID).
+		Data(tokenLog).
+		Save()
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-// GetByAppId 根据 app_id 查询 token log
-func (d *tokenLogDao) GetByAppId(ctx context.Context, appId string) (*entity.WechatTokenLog, error) {
-	var log entity.WechatTokenLog
-	err := g.Model("wechat_token_log").
-		Where("app_id", appId).
-		Scan(&log)
+func (d *shopSetDao) GetAppIdByShopId(ctx context.Context, shopid string) (string, error) {
+	var appId string
+	err := g.Model("wechat_shop").
+		Fields("app_id").
+		Where("shop_id = ?", shopid).
+		Scan(&appId)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return &log, nil
+	return appId, nil
 }

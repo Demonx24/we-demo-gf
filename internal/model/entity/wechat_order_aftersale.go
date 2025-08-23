@@ -5,7 +5,7 @@ import "time"
 // WechatAftersale 售后单详情表模型
 type WechatAftersale struct {
 	ID               int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	AfterSaleOrderID *int64    `gorm:"column:after_sale_order_id"` // 可空
+	AfterSaleOrderID int64     `gorm:"column:after_sale_order_id"` // 可空
 	Status           string    `gorm:"column:status;size:100;default:'';not null"`
 	OrderID          int64     `gorm:"column:order_id;default:0;not null"`
 	CreateTime       int64     `gorm:"column:create_time;default:0;not null"`
