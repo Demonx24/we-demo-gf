@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>在线客服 - 客服端</title>
+    <style>
+        #chat div.history { color: gray; }
+        #chat div.system { color: red; }
+        #chat img { max-width: 200px; display: block; margin: 5px 0; }
+    </style>
+</head>
+<body>
+<h2>在线客服（客服端）</h2>
+<div id="chat"></div>
+<input id="target" placeholder="用户ID" />
+<input id="msg" placeholder="输入回复..." />
+<button onclick="send()">发送</button>
+<br>
+<input type="file" id="fileInput" />
+<button onclick="upload()">上传图片</button>
+
+<script>
+    const agentId = "客服";  // 固定客服ID
+    const ws = new WebSocket("ws://127.0.0.1:8000/ws?id=" + agentId );
+    const chat = document.getElementById("chat");
+
+    ws.onmessage = (ev) => {
+        const m = JSON.parse(ev.data);
+        const div = document.createElement("div");
+        if(m.type === "system") div.className = "system";
+        if(m.type === "history") div.className = "history";
+
+        // 判断是否是图片链接（更稳健，支持 query 参数）
+        const isImage = /(http(s?):)([/|.|\w|\s|-])*\.(?:jpg|jpeg|png|gif)(\?.*)?$/i.test(m.text);
+        let imgUrl = m.text;
+        if (isImage && !/^https?:\/\//i.test(imgUrl)) {
+            imgUrl = "http://127.0.0.1:8000" + imgUrl;  // ⚠️ 替换成你后端的真实地址
+        }
+
+        if (isImage) {
+            div.innerHTML = `
+            [${m.role}] ${m.senderId}: <br>
+            <img src="${imgUrl}"
+                 alt="image"
+                 style="max-width:200px; max-height:200px; border-radius:8px; margin-top:5px;"
+                 onerror="this.onerror=null;this.src='fallback.png';" />
+        `;
+        } else {
+            div.textContent = `[${m.role}] ${m.senderId}: ${m.text}`;
+        }
+
+        chat.appendChild(div);
+    };
+
+    function send() {
+        const targetId = document.getElementById("target").value;
+        const text = document.getElementById("msg").value;
+        ws.send(JSON.stringify({ type:"chat", targetId, text }));
+        document.getElementById("msg").value = "";
+    }
+
+    function upload() {
+        const targetId = document.getElementById("target").value;
+        const fileInput = document.getElementById("fileInput");
+        const file = fileInput.files[0];
+        if (!file) return alert("请选择图片");
+
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("userId", agentId);
+        formData.append("targetId", targetId);
+        formData.append("role", "agent");
+
+        fetch("/upload", { method: "POST", body: formData })
+            .then(res => res.json())
+            .then(res => {
+                if (res.code === 0) {
+                    console.log("上传成功:", res.url);
+                } else {
+                    alert("上传失败: " + res.message);
+                }
+            });
+    }
+</script>
+</body>
+</html>

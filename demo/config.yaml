@@ -1,0 +1,15 @@
+server:
+  address: ":8000"   # WebSocket/HTTP 监听端口
+  SessionMaxAge: 0
+
+database:
+  default:
+    link: "root:8fc10572d0dd8426@tcp(43.138.236.207:3306)/websocket?charset=utf8mb4&parseTime=True&loc=Local"
+    debug: true      # 开启调试模式（打印 SQL 日志）
+redis:
+  # 单实例配置示例1
+  default:
+    address: 127.0.0.1:6379
+    db:      1
+    pass:
+    idleTimeout: 600

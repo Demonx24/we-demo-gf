@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8" />
+    <title>聊天测试</title>
+    <style>
+        body { font-family: sans-serif; padding: 10px; display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+        .panel { border: 1px solid #ddd; border-radius: 6px; padding: 10px; }
+        #sessions li, #users li { cursor: pointer; padding: 6px; border-bottom: 1px dashed #eee; }
+        #sessions li.active { background: #f6faff; }
+        #msgs { height: 300px; overflow-y: auto; border: 1px solid #eee; padding: 6px; margin-top: 6px; white-space: pre-wrap; }
+        .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        input { padding: 4px 6px; }
+        button { padding: 6px 12px; }
+        small.badge{padding:2px 6px;border-radius:10px;background:#eee;margin-left:6px;}
+    </style>
+</head>
+<body>
+
+<div class="panel">
+    <h3>我的账号</h3>
+    <div class="row">
+        <label>用户ID: <input id="userID" value="1"></label>
+        <label>昵称: <input id="nickname" value="测试用户1"></label>
+    </div>
+    <div class="row">
+        <button onclick="connectWS()">连接 WebSocket</button>
+        <button onclick="manualLoadSessions()">手动刷新会话</button>
+        <button onclick="loadUsers()">刷新用户列表</button>
+    </div>
+
+    <h3>用户列表</h3>
+    <ul id="users"></ul>
+
+    <h3>会话列表</h3>
+    <ul id="sessions"></ul>
+</div>
+
+<div class="panel">
+    <h3>当前会话</h3>
+    <div class="row">
+        <div>会话ID: <span id="curSid">-</span></div>
+        <div>对端: <span id="peerId">-</span></div>
+        <small class="badge" id="peerOnline">离线</small>
+    </div>
+
+    <div id="msgs"></div>
+
+    <div class="row" style="margin-top:10px;">
+        <input id="content" placeholder="输入消息..." style="flex:1;">
+        <button onclick="sendMessage()">发送</button>
+    </div>
+
+    <h4>日志</h4>
+    <div id="log" style="height:120px;overflow:auto;border:1px solid #eee;padding:6px;"></div>
+</div>
+
+<script>
+    let ws;
+    const API = location.origin;
+
+    let sessions = new Map();   // sid -> session对象
+    let currentSession = null;  // 选中的session对象
+    let messages = [];          // 当前会话的消息
+
+    function log(msg) {
+        const box = document.getElementById('log');
+        const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        box.innerText += line + "\n";
+        box.scrollTop = box.scrollHeight;
+    }
+
+    // ===== 用户列表 =====
+    async function loadUsers() {
+        const res = await fetch(API + "/user/list");
+        const ret = await res.json();
+        const ul = document.getElementById("users");
+        ul.innerHTML = "";
+        if (ret.code !== 0) {
+            log("❌ 获取用户失败: " + ret.msg);
+            return;
+        }
+        const myId = parseInt(document.getElementById("userID").value);
+        ret.data.forEach(u => {
+            if (u.user_id === myId) return; // 不展示自己
+            const li = document.createElement("li");
+            li.textContent = `#${u.user_id} ${u.username} (${u.is_online === 1 ? "在线" : "离线"})`;
+            li.onclick = () => createSessionWith(u.user_id);
+            ul.appendChild(li);
+        });
+    }
+
+    async function createSessionWith(peerId) {
+        const myId = parseInt(document.getElementById("userID").value);
+        const res = await fetch(API + "/talk/session/save", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({ send_id: myId, receiver_id: peerId })
+        });
+        const ret = await res.json();
+        if (ret.code === 0) {
+            log(`✅ 会话创建成功, SID=${ret.data.id}`);
+            // 自动加载会话并打开
+            await manualLoadSessions();
+            openSession(ret.data.id, myId);
+        } else {
+            log("❌ 会话创建失败: " + ret.msg);
+        }
+    }
+
+    // ===== 会话列表 & 消息 =====
+    function renderSessions(list) {
+        const ul = document.getElementById('sessions');
+        ul.innerHTML = "";
+        sessions.clear();
+        const uid = parseInt(document.getElementById('userID').value);
+
+        list.forEach(s => {
+            sessions.set(s.id, s);
+            const li = document.createElement('li');
+            const online = s.is_online === 1 ? "✅" : "❌";
+            const unread = s.un_read_num || 0;
+            li.textContent = `#${s.id} [${s.name}] ${online} 未读:${unread}  最后: ${s.msg_text || ""}`;
+            if (currentSession && currentSession.id === s.id) li.classList.add('active');
+            li.onclick = () => openSession(s.id, uid);
+            ul.appendChild(li);
+        });
+    }
+
+    function renderMessages(arr) {
+        const box = document.getElementById('msgs');
+        box.innerHTML = "";
+        arr.forEach(m => {
+            const who = m.send_id === parseInt(document.getElementById('userID').value) ? "我" : `用户${m.send_id}`;
+            const line = `${who}：${m.content}  (${m.created_at || m.CreatedAt || ""})`;
+            const div = document.createElement('div');
+            div.textContent = line;
+            box.appendChild(div);
+        });
+        box.scrollTop = box.scrollHeight;
+    }
+
+    // ===== WebSocket 相关 =====
+    function connectWS() {
+        const uid = document.getElementById('userID').value;
+        const name = document.getElementById('nickname').value;
+        ws = new WebSocket(`ws://${location.host}/ws?id=${uid}&name=${encodeURIComponent(name)}`);
+
+        ws.onopen = () => log("✅ WS 已连接");
+        ws.onclose = () => log("❌ WS 已断开");
+        ws.onmessage = (evt) => {
+            const data = JSON.parse(evt.data);
+            if (data.event === "connect") {
+                log("🤝 " + JSON.stringify(data.content));
+                return;
+            }
+            if (data.event === "pong") return;
+
+            switch (data.action) {
+                case "session_list":
+                    renderSessions(data.data || []);
+                    break;
+                case "offline_messages":
+                    log(`📦 收到离线消息 ${data.data.length} 条`);
+                    (data.data || []).forEach(pushMessageToUI);
+                    break;
+                case "new_message":
+                    pushMessageToUI(data.data);
+                    manualLoadSessions(true);
+                    break;
+                case "session_updated":
+                    const s = data.data;
+                    if (s) {
+                        sessions.set(s.id, s);
+                        renderSessions(Array.from(sessions.values()));
+                        if (currentSession && currentSession.id === s.id) updatePeerStatusUI(s);
+                    }
+                    break;
+                case "user_presence":
+                    log(`👤 用户${data.data.user_id} ${data.data.online ? "上线" : "离线"}`);
+                    manualLoadSessions(true); // 同步会话状态
+                    break;
+                default:
+                    log("收到: " + evt.data);
+            }
+        };
+    }
+
+    function pushMessageToUI(m) {
+        if (!m) return;
+        if (currentSession && m.session_id === currentSession.id) {
+            messages.push(m);
+            renderMessages(messages);
+        }
+    }
+
+    async function manualLoadSessions(silent=false) {
+        const uid = document.getElementById("userID").value;
+        const res = await fetch(API + "/talk/session/list?user_id=" + uid);
+        const ret = await res.json();
+        if (ret.code === 0) {
+            renderSessions(ret.data || []);
+        } else if (!silent) {
+            log("❌ 加载会话失败: " + ret.msg);
+        }
+    }
+
+    async function openSession(sid, myUid) {
+        currentSession = sessions.get(sid);
+        if (!currentSession) return;
+
+        document.getElementById('curSid').innerText = sid;
+        const peer = (myUid === currentSession.send_id) ? currentSession.receiver_id : currentSession.send_id;
+        document.getElementById('peerId').innerText = peer;
+        updatePeerStatusUI(currentSession);
+
+        const res = await fetch(API + `/talk/message/list?sid=${sid}&page=1&size=50`);
+        const ret = await res.json();
+        if (ret.code === 0) {
+            messages = ret.data.slice().reverse();
+            renderMessages(messages);
+        } else {
+            log("❌ 加载消息失败: " + ret.msg);
+        }
+
+        await fetch(API + "/talk/session/read", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({ session_id: sid, user_id: myUid })
+        });
+
+        const s = sessions.get(sid);
+        if (s) { s.un_read_num = 0; sessions.set(sid, s); renderSessions(Array.from(sessions.values())); }
+    }
+
+    function updatePeerStatusUI(sess) {
+        const tag = document.getElementById('peerOnline');
+        tag.innerText = (sess.is_online === 1 ? "在线" : "离线");
+    }
+
+    async function sendMessage() {
+        if (!currentSession) {
+            log("❌ 请先选择会话");
+            return;
+        }
+        const myUid = parseInt(document.getElementById("userID").value);
+        const content = document.getElementById("content").value.trim();
+        if (!content) return;
+
+        if (myUid !== currentSession.send_id && myUid !== currentSession.receiver_id) {
+            log("❌ 你不在该会话中");
+            return;
+        }
+        const expectedReceiver = (myUid === currentSession.send_id) ? currentSession.receiver_id : currentSession.send_id;
+
+        const payload = {
+            session_id: currentSession.id,
+            send_id: myUid,
+            receiver_id: expectedReceiver,
+            msg_type: 1,
+            content: content,
+            nickname: document.getElementById("nickname").value,
+            avatar: "https://placekitten.com/50/50"
+        };
+
+        const res = await fetch(API + "/talk/message/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+        const ret = await res.json();
+        if (ret.code === 0) {
+            pushMessageToUI({ ...payload, session_id: currentSession.id, send_id: myUid, created_at: new Date().toISOString() });
+            document.getElementById("content").value = "";
+        } else {
+            log("❌ 发送失败: " + ret.msg);
+        }
+    }
+</script>
+</body>
+</html>
